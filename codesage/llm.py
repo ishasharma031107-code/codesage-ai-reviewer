@@ -1,5 +1,6 @@
 """Talk to a local open-weight model through Ollama's HTTP API (stdlib only)."""
 import json
+import re
 import os
 import urllib.request
 import urllib.error
@@ -20,7 +21,8 @@ Reply with ONLY JSON in this exact shape:
 
 COMMIT_SYSTEM = """You write git commit messages in Conventional Commits style.
 Given a diff summary, reply with ONLY the commit message: a subject line under 72 chars
-(type(scope): description), a blank line, then 1-4 short bullet points. No code fences."""
+(type(scope): description), a blank line, then 1-4 short bullet points starting with "- ".
+Do NOT invent issue or PR numbers. No code fences."""
 
 
 class LLMError(RuntimeError):
@@ -94,4 +96,7 @@ def review_file(fd, model, url=None):
 def commit_message(file_summaries, stat, model, url=None):
     user = f"Files changed:\n{stat}\n\nPer-file summaries:\n" + "\n".join(
         f"- {p}: {s}" for p, s in file_summaries.items())
-    return chat(model, COMMIT_SYSTEM, user, url=url).strip().strip("`").strip()
+    msg = chat(model, COMMIT_SYSTEM, user, url=url).strip().strip("`").strip()
+    msg = re.sub(r"\s*\(#\d+\)", "", msg)           # drop hallucinated PR numbers
+    msg = re.sub(r"(?m)^\s*[*\u2022]\s+", "- ", msg)   # normalise bullets
+    return msg

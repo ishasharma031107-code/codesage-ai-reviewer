@@ -16,15 +16,24 @@ SEV_COLOR = {"high": "1;31", "medium": "1;33", "low": "33"}
 
 
 def dedupe(issues):
-    """Static and model findings on the same line+category: keep one, prefer the model's (it has a fix)."""
-    seen, out = {}, []
-    for i in sorted(issues, key=lambda x: (x["source"] != "model")):
-        k = (i["file"], i["line"], i["category"])
-        if k in seen:
+    """One finding per file+line. Keep the highest severity; prefer the AI's text (it has a fix),
+    and tag it [static+ai] when both sources agree."""
+    best = {}
+    for i in issues:
+        k = (i["file"], i["line"])
+        cur = best.get(k)
+        if cur is None:
+            best[k] = dict(i)
             continue
-        seen[k] = True
-        out.append(i)
-    return sorted(out, key=lambda x: (SEV_ORDER.get(x["severity"], 3), x["file"], x["line"]))
+        sev = min(cur["severity"], i["severity"], key=lambda s: SEV_ORDER.get(s, 3))
+        keep = dict(i) if i["source"] == "model" and cur["source"] == "static" else cur
+        if {cur["source"], i["source"]} == {"static", "model"}:
+            keep["source"] = "static+ai"
+            static = cur if cur["source"] == "static" else i
+            keep["category"] = static["category"]
+        keep["severity"] = sev
+        best[k] = keep
+    return sorted(best.values(), key=lambda x: (SEV_ORDER.get(x["severity"], 3), x["file"], x["line"]))
 
 
 def score(issues):
@@ -42,7 +51,7 @@ def terminal(result):
     for i in issues:
         sev = i["severity"]
         tag = c(SEV_COLOR[sev], f"{SEV_ICON[sev]} {sev.upper():6}")
-        src = c("2", "[static]" if i["source"] == "static" else "[ai]")
+        src = c("2", {"static": "[static]", "model": "[ai]"}.get(i["source"], "[static+ai]"))
         loc = f"{i['file']}:{i['line']}"
         print(f"\n{tag} {c('1', i['title'])}  {c('36', loc)} {c('2', i['category'])} {src}")
         if i.get("detail"):
